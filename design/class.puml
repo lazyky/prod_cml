@@ -1,0 +1,83 @@
+@startuml ProdCML-class
+
+
+struct DBClient{
+  # database_server
+  # user
+  # password
+}
+
+enum APIType {
+  Web
+  Cmd
+}
+
+class Logging {
+  .. DB Connect ..
+  # DBClient
+  # api_type: APIType
+  .. logs info ..
+  # callable
+  # content
+  # res_code
+  # output
+  --
+  + void __construct()
+  + void log()
+}
+
+class Process {
+  .. DB Connect ..
+  # DBClient
+  ..
+  # data
+  # work_dir
+  --
+  + void __construct()
+  + void clean(relative_dir, keep_day = 89)
+
+}
+
+class Predict {
+  --
+  + void __construct()
+  + string predict()
+  + array[string] query_predictions(url)
+}
+
+class TrainData {
+  + void register()
+  + array[string] query_batches(url)
+  + array[string] query_log(url, work_dir)
+}
+
+class Task {
+  .. DB Connect ..
+  # DBClient
+  ..
+  # batch_name
+  # min_start_count
+  # min_update_count
+  # work_dir
+  --
+  + void __construct()
+  - void insert_pending_task(DBClient, batch)
+  - void clean(DBClient, work_dir)
+  - array[string] produce(DBClient, min_start_count, min_update_count)
+  + array[string] query_tasks(url)
+  + {static} bool check_available(DBClient, batch_name)
+  + {static} void prepare(DBClient, work_dir, min_start_count, min_update_count)
+  + {static} bool enable(DBClient, work_dir, task_label, batch_name, start_time, previous_model, cwd)
+  + void run()
+}
+
+Predict --|> Process: extends
+TrainData --|> Process: extends
+Task ..|> Logging: Use
+Process ..|> Logging: Use
+Predict ..|> Logging: Use
+Logging ..|> APIType: Use
+Task ..|> DBClient: Use
+Process ..|> DBClient: Use
+Logging ..|> DBClient: Use
+@enduml

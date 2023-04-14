@@ -1,0 +1,106 @@
+@startuml ProdCML-sequence
+
+actor User as U
+participant "Work Directory" as Work
+participant ProdCML
+participant "Model Training" as M
+database Database as DB
+
+== Train ==
+
+U -> ProdCML: send training data and information
+ProdCML -> ProdCML: split data into train/test datasets
+note left
+    <code>
+    $group = lcg_value() > 0.2 ? 'train' : 'test'
+    </code>
+end note
+ProdCML -> Work: save data to disk
+ProdCML -> DB: insert train/test data information
+
+== trigger training ==
+ProdCML -> ProdCML: clean up stuck or timeout tasks
+ProdCML -> DB: get all batches information
+DB-> ProdCML: send all batches information
+
+loop for batch in batches
+    ProdCML -> DB: check if batch is still in training
+    DB -> ProdCML: batch status
+
+    opt batch not in training
+        ProdCML -> DB: check if a model exists for the batch
+        DB -> ProdCML: model status
+        alt no model exists
+            ProdCML -> DB: get training data count
+            DB -> ProdCML: count of training data
+
+            opt training data count > $min_start_count
+                ProdCML -> M ** : create pending training task
+            end
+        else model exists
+            ProdCML -> DB: query batch model update time
+            DB -> ProdCML: latest model update time
+
+            ProdCML -> DB: get new training data count since model update time
+            DB -> ProdCML: count of new training data
+
+            opt new training data count > $min_update_count
+                ProdCML -> M ** : create pending training task
+            end
+        end
+        opt exist pending training task
+            ProdCML -> DB: check if a model exists for the batch
+            DB -> ProdCML: model status
+            alt no model exists
+                ProdCML -> DB: fetch train/test data path of batch
+                Work -> ProdCML: train/test datasets
+                ProdCML -> M ++ : train/test data => formated data
+                M -> Work --: all train/test dataset to disk
+            else model exists
+                ProdCML -> DB: fetch new train/test data path of batch since model update time
+                Work -> ProdCML: new train/test datasets
+                ProdCML -> M ++: new train/test data => formated data
+                Work -> M: fetch existing formated all data
+                M -> M: concatenate data
+                M -> Work: all train/test dataset to disk
+            end
+            M -> M : pre-process data
+            M -> Work: processed train/test dataset to disk
+            group train-from-scratch
+                M -> M ++ #ffa31a : start training
+                M -> Work: write model/logs to disk
+                return reach convergence
+            end
+            M -> M ++ #ffa31a : start evaluate trained model
+            M -> Work: write evaluation logs to disk
+            return stop evaluate trained model
+            ProdCML -> M !!:  stop training
+            alt trained model passes
+                ProdCML -> Work: write test results to disk
+                ProdCML -> Work: erase unnecessary checkpoints
+                ProdCML -> DB: update model infomation
+            else trained model fails
+                ProdCML -> DB: Critical Error
+            end
+        end
+    end
+end
+
+== Prediction ==
+
+U -> ProdCML: send data and information for prediction
+ProdCML -> ProdCML: check if batch can be predicted
+
+alt batch can be predicted
+    ProdCML -> ProdCML: pre-process data
+    ProdCML -> Work: save processed data to disk
+    ProdCML -> Work: fetch predictive model
+    Work -> ProdCML: predictive model
+    ProdCML -> ProdCML: prediction()
+    ProdCML -> DB: update prediction results
+ProdCML -> U: return prediction results
+else batch cannot be predicted
+    ProdCML -> U: the batch cannot be predicted
+end
+
+@enduml
